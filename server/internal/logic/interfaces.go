@@ -7,6 +7,9 @@ type Service interface {
 	Register(c *gin.Context)
 	UploadArchive(c *gin.Context)
 
+	GetRepos(c *gin.Context)
+	DownloadRepo(c *gin.Context)
+
 	JwtAuthMiddleware() gin.HandlerFunc
 }
 

@@ -1,78 +1,83 @@
 package logic
 
 import (
+	"archive/zip"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gin-gonic/gin"
-	"github.com/spruceid/siwe-go"
 	"net/http"
+	"os"
 )
 
-type walletRequestBody struct {
-	Message   string
-	Signature string
-}
-
-func (s *service) Login(c *gin.Context) {
-	var req walletRequestBody
-	if err := c.BindJSON(req); err != nil {
-		c.String(http.StatusBadRequest, fmt.Sprintf("can't parse request:%s", err.Error()))
+func (s *service) GetRepos(c *gin.Context) {
+	wallet, exists := c.Get("wallet")
+	if !exists {
+		c.String(http.StatusInternalServerError, "no wallet in request context")
 		return
 	}
 
-	address, err := s.getMessageAddress(req)
+	user, err := s.repo.GetUser(wallet.(string))
 	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("can't get message address: %s", err.Error()))
-		return
+		c.String(http.StatusInternalServerError, fmt.Sprintf("can't get user by wallet: %v", err.Error()))
 	}
 
-	token, err := s.tokenManager.GenerateToken(address)
-	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("can't generate token: %s", err.Error()))
-		return
+	var repos []string
+	for repo := range user.Repos {
+		repos = append(repos, repo)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"token": token,
+		"repos": repos,
 	})
 }
 
-func (s *service) Register(c *gin.Context) {
-	var req walletRequestBody
-	if err := c.BindJSON(req); err != nil {
-		c.String(http.StatusBadRequest, fmt.Sprintf("can't parse request:%s", err.Error()))
+func (s *service) DownloadRepo(c *gin.Context) {
+	wallet, exists := c.Get("wallet")
+	if !exists {
+		c.String(http.StatusInternalServerError, "no wallet in request context")
 		return
 	}
 
-	address, err := s.getMessageAddress(req)
+	walletStr := wallet.(string)
+	repoName := c.Param("repo")
+	user, err := s.repo.GetUser(walletStr)
 	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("can't get message address: %s", err.Error()))
+		c.String(http.StatusInternalServerError, fmt.Sprintf("can't get user: %s", err.Error()))
 		return
 	}
 
-	actionToken, encryptionKey, err := s.repo.CreateUser(address)
+	files, err := s.getOldFiles(walletStr, repoName, user.EncryptionKey)
 	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("can't create user: %s", err.Error()))
+		c.String(http.StatusInternalServerError, fmt.Sprintf("error getting old files: %s", err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"action_token":   actionToken,
-		"encryption_key": encryptionKey,
-	})
-}
-
-func (s *service) getMessageAddress(req walletRequestBody) (string, error) {
-	message, err := siwe.ParseMessage(req.Message)
+	path := fmt.Sprintf("%s/%s.zip", walletStr, repoName)
+	file, err := os.Create(path)
 	if err != nil {
+		c.String(http.StatusInternalServerError, fmt.Sprintf("error creating an archive: %s", err.Error()))
+		return
+	}
+	defer file.Close()
 
-		return "", fmt.Errorf("can't parse messageStr: %s", err.Error())
+	w := zip.NewWriter(file)
+	defer w.Close()
+
+	for filename, b := range files {
+		f, err := w.Create(filename)
+		if err != nil {
+			c.String(http.StatusInternalServerError, fmt.Sprintf("error adding file to an archive: %s", err.Error()))
+			return
+		}
+
+		if _, err := f.Write(b); err != nil {
+			c.String(http.StatusInternalServerError, fmt.Sprintf("error writing to file in an archive: %s", err.Error()))
+			return
+		}
 	}
 
-	publicKey, err := message.VerifyEIP191(req.Signature)
-	if err != nil {
-		return "", fmt.Errorf("can't verify signature: %s", err.Error())
-	}
-
-	return crypto.PubkeyToAddress(*publicKey).Hex(), nil
+	c.Header("Content-Description", "File Transfer")
+	c.Header("Content-Transfer-Encoding", "binary")
+	c.Header("Content-Disposition", "attachment; filename="+repoName+".zip")
+	c.Header("Content-Type", "application/octet-stream")
+	c.File(path)
 }
