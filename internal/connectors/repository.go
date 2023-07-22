@@ -3,6 +3,7 @@ package connectors
 import (
 	"errors"
 	"git-test/internal/common"
+	"github.com/ipfs/go-cid"
 )
 
 type repository struct {
@@ -32,7 +33,7 @@ func (r *repository) GetUserByActionToken(token string) (common.User, error) {
 	}
 
 	if res.Wallet == "" {
-		return common.User{}, errors.New("user not found")
+		return common.User{}, errors.New("unknown token")
 	}
 
 	return res, nil
@@ -52,4 +53,27 @@ func (r *repository) CreateUser(wallet string) (string, string, error) {
 	r.users[wallet] = user
 
 	return token, encryptionKey, nil
+}
+
+func (r *repository) SaveRepoVersion(wallet, repoName string, id cid.Cid) error {
+	if _, ok := r.users[wallet]; !ok {
+		return errors.New("user does not exist")
+	}
+
+	if _, ok := r.users[wallet].Repos[repoName]; !ok {
+		r.users[wallet].Repos[repoName] = []cid.Cid{}
+	}
+
+	r.users[wallet].Repos[repoName] = append(r.users[wallet].Repos[repoName], id)
+
+	return nil
+}
+
+func (r *repository) GetRepoIDs(wallet, repoName string) ([]cid.Cid, error) {
+	user, ok := r.users[wallet]
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+
+	return user.Repos[repoName], nil
 }

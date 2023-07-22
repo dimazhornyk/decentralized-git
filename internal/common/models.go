@@ -1,10 +1,12 @@
 package common
 
+import "github.com/ipfs/go-cid"
+
 type User struct {
 	Wallet        string
 	ActionToken   string
 	EncryptionKey string
-	Repos         []string
+	Repos         map[string][]cid.Cid // repoName -> versions
 }
 
 type NonUTFFile struct {

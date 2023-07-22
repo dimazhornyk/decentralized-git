@@ -11,12 +11,13 @@ import (
 	"git-test/internal/common"
 	"git-test/internal/connectors"
 	"github.com/gin-gonic/gin"
+	"github.com/ipfs/go-cid"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -27,12 +28,17 @@ const (
 )
 
 type service struct {
+	storage      connectors.Storage
 	repo         connectors.Repository
 	tokenManager TokenManager
 }
 
-func NewService(conf *common.Config) (Service, error) {
-	return &service{}, nil
+func NewService(tokenManager TokenManager, repo connectors.Repository, storage connectors.Storage) (Service, error) {
+	return &service{
+		tokenManager: tokenManager,
+		storage:      storage,
+		repo:         repo,
+	}, nil
 }
 
 func (s *service) UploadArchive(c *gin.Context) {
@@ -57,7 +63,7 @@ func (s *service) UploadArchive(c *gin.Context) {
 		return
 	}
 
-	oldFiles, err := s.getOldFiles(user.Wallet, repo)
+	oldFiles, err := s.getOldFiles(user.Wallet, repo, user.EncryptionKey)
 	if err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("get old files error: %s", err.Error()))
 		return
@@ -81,39 +87,169 @@ func (s *service) UploadArchive(c *gin.Context) {
 		return
 	}
 
-	files, err := s.uploadNewDiffs(repo, encoded)
+	contentID, err := s.uploadNewDiffs(user.Wallet, repo, encoded)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	defer func() {
-		for _, f := range files {
-			if err := os.Remove(f); err != nil {
-				fmt.Printf("remove file error: %s\n", err.Error())
-			}
-		}
-	}()
+	if err := s.repo.SaveRepoVersion(user.Wallet, repo, contentID); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	c.String(http.StatusOK, "Files successfully uploaded!")
 }
 
-// TODO
-func (s *service) getOldFiles(walletAddress, repoFullName string) (map[string][]byte, error) {
-	return map[string][]byte{}, nil
-}
-
-func (s *service) uploadNewDiffs(repoName string, files map[string][]byte) ([]string, error) {
-	finalNames := make([]string, 0, len(files))
-	for name, f := range files {
-		filename := fmt.Sprintf("%s/%s/%d", repoName, name, int(time.Now().Unix()))
-		if err := os.WriteFile(filename, f, 0644); err != nil {
-			return nil, err
-		}
-		finalNames = append(finalNames, filename)
+func (s *service) getOldFiles(walletAddress, repoFullName, encryptionKey string) (map[string][]byte, error) {
+	ids, err := s.repo.GetRepoIDs(walletAddress, repoFullName)
+	if err != nil {
+		return nil, err
 	}
 
-	return finalNames, nil
+	filesState := make(map[string][]byte)
+	for _, id := range ids {
+		fsys, err := s.storage.GetRepoFiles(id)
+		if err != nil {
+			return nil, err
+		}
+
+		files := make(map[string][]byte)
+		if err := fs.WalkDir(fsys, "/", func(path string, d fs.DirEntry, err error) error {
+			f, err := fsys.Open(d.Name())
+			if err != nil {
+				return err
+			}
+
+			buf := new(bytes.Buffer)
+			if _, err := io.Copy(buf, f); err != nil {
+				return err
+			}
+
+			decrypted, err := s.decryptFile(buf.Bytes(), []byte(encryptionKey))
+			files[d.Name()] = decrypted
+
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+
+		if err := s.applyDiffs(filesState, files); err != nil {
+			return nil, err
+		}
+	}
+
+	return filesState, nil
+}
+
+func (s *service) applyDiffs(currState map[string][]byte, diffs map[string][]byte) error {
+	buff := new(bytes.Buffer)
+	dec := gob.NewDecoder(buff)
+	for filename, f := range diffs {
+		if _, err := buff.Write(f); err != nil {
+			return fmt.Errorf("error writing to buffer: %w", err)
+		}
+
+		curr := currState[filename]
+
+		var utfFile common.UTFFile
+		if err := dec.Decode(&utfFile); err == nil {
+			merged, err := s.mergeWithDiffs(curr, utfFile)
+			if err != nil {
+				return err
+			}
+			currState[filename] = merged
+		} else {
+			var nonUTFFile common.NonUTFFile
+			if _, err := buff.Write(f); err != nil {
+				return fmt.Errorf("error writing to buffer: %w", err)
+			}
+
+			if err := dec.Decode(&nonUTFFile); err != nil {
+				return fmt.Errorf("can't decode a file: %w", err)
+			}
+
+			currState[filename] = nonUTFFile.Content
+		}
+	}
+
+	return nil
+}
+
+func (s *service) mergeWithDiffs(bs []byte, file common.UTFFile) ([]byte, error) {
+	if len(bs) == 0 {
+		resStrs := make([]string, len(file.InsertedLines))
+		for idx, line := range file.InsertedLines {
+			resStrs[idx] = line
+		}
+
+		return []byte(strings.Join(resStrs, "\n")), nil
+	}
+
+	str := string(bs)
+	lines := strings.SplitAfter(str, "\n")
+	res := make([]string, 0)
+	for i, line := range lines {
+		var found bool
+		for _, n := range file.DeletedLines {
+			if i == n {
+				found = true
+			}
+		}
+
+		if !found {
+			res = append(res, line)
+		}
+	}
+
+	for i, line := range file.InsertedLines {
+		res = append(res[:i+1], res[i:]...)
+		res[i] = line
+	}
+
+	return []byte(strings.Join(res, "\n")), nil
+}
+
+func (s *service) decryptFile(b []byte, key []byte) ([]byte, error) {
+	var res []byte
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	iv := b[:aes.BlockSize]
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(b[aes.BlockSize:], res)
+
+	return res, nil
+}
+
+func (s *service) uploadNewDiffs(wallet, repoName string, files map[string][]byte) (cid.Cid, error) {
+	dir := fmt.Sprintf("%s/%s", wallet, repoName)
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Printf("cleanup error: %s\n", err.Error())
+		}
+	}()
+
+	for name, f := range files {
+		filename := fmt.Sprintf("%s/%s/%s", wallet, repoName, name)
+		if err := os.WriteFile(filename, f, 0644); err != nil {
+			return cid.Cid{}, err
+		}
+	}
+
+	f, err := os.Open(fmt.Sprintf("%s/%s", wallet, repoName))
+	if err != nil {
+		return cid.Cid{}, err
+	}
+
+	id, err := s.storage.Upload(f)
+	if err != nil {
+		return cid.Cid{}, err
+	}
+
+	return id, nil
 }
 
 func getDiffs(oldFiles map[string][]byte, newFiles []*zip.File) (map[string]any, error) {
