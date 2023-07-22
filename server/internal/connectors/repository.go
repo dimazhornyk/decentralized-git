@@ -6,6 +6,7 @@ import (
 	"github.com/ipfs/go-cid"
 )
 
+// TODO: a proper db must be used here, but it's not a priority for demoable MVP
 type repository struct {
 	users map[string]common.User
 }
