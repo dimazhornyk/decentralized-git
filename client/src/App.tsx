@@ -1,4 +1,3 @@
-import {BrowserRouter, Route, Routes, Navigate} from 'react-router-dom';
 import {MetaMaskProvider, useMetaMask} from './hooks/useMetaMask'
 import {SdkLayout} from './components/SdkProvider'
 import {InitialView} from "./components/Initial";
@@ -8,12 +7,7 @@ export default function App() {
     return (
         <MetaMaskProvider>
             <SdkLayout>
-                {/*<BrowserRouter>*/}
-                {/*    <Routes>*/}
-                {/*        <Route path="/" element={<Main/>}/>*/}
                 <Main/>
-                {/*</Routes>*/}
-                {/*</BrowserRouter>*/}
             </SdkLayout>
         </MetaMaskProvider>
     )
