@@ -3,20 +3,19 @@ import {APIURL} from "../config";
 import {useUser} from "../hooks/useUser";
 
 type Props = {
-    name: string
+    name: string,
+    token: string
 }
 
-export const RepoRow: React.FC<Props> = ({name}) => {
-    const {userToken} = useUser()
-
+export const RepoRow: React.FC<Props> = ({name, token}) => {
     const downloadAsZip = () => {
         const options = {
             headers: {
-                Authorization: `Bearer ${userToken}`
+                Authorization: `Bearer ${token}`
             }
         };
 
-        fetch(`${APIURL}/downloadRepo?` + new URLSearchParams({
+        fetch(`${APIURL}/api/downloadRepo?` + new URLSearchParams({
             repo: name,
         }), options)
             .then(res => res.blob())

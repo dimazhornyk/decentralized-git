@@ -3,6 +3,7 @@ package logic
 import "github.com/gin-gonic/gin"
 
 type Service interface {
+	GetNonce(c *gin.Context)
 	Login(c *gin.Context)
 	Register(c *gin.Context)
 	UploadArchive(c *gin.Context)

@@ -7,26 +7,32 @@ import {useUser} from "../hooks/useUser";
 
 export const ReposView = () => {
     const [repos, setRepos] = useState([]);
-    const { userToken } = useUser();
+    const {userToken, isLoading} = useUser();
 
     useEffect(() => {
-        fetch(`${APIURL}/getRepos`, {
+        if (isLoading) {
+            return
+        }
+
+        fetch(`${APIURL}/api/getRepos`, {
             headers: {
                 Authorization: `Bearer ${userToken}`
             }
         })
             .then((res) => res.json())
             .then((data) => {
+                console.log(data.repos)
                 setRepos(data.repos)
             })
             .catch((err) => {
                 console.log(err.message);
             });
-    }, []);
+    }, [isLoading]);
 
     return (
-        <div>
-            {repos.map((repo, i) => <RepoRow name={repo} key={i}/>)}
+        <div style={{display: "flex", flexDirection: "column", alignItems: "center"}}>
+            <h2>Repositories:</h2>
+            {repos.map((repo, i) => <RepoRow name={repo} token={userToken!} key={i}/>)}
         </div>
     )
 }

@@ -12,7 +12,16 @@ type repository struct {
 }
 
 func NewRepository(cfg *common.Config) (Repository, error) {
-	return &repository{}, nil
+	return &repository{
+		users: map[string]common.User{
+			"0xC87CB8CEa4426c87Fb53e9BD64e0530BDe1cef2b": {
+				Wallet:        "0xC87CB8CEa4426c87Fb53e9BD64e0530BDe1cef2b",
+				ActionToken:   "nBjBwLvhZrjyrywCSMlkrOpoupuGPSfH",
+				EncryptionKey: "HmsQxFWISzgMPGzBaNVchpeuoLhEBOUK",
+				Repos:         map[string][]cid.Cid{},
+			},
+		},
+	}, nil
 }
 
 func (r *repository) GetUser(wallet string) (common.User, error) {
@@ -45,11 +54,12 @@ func (r *repository) CreateUser(wallet string) (string, string, error) {
 		return "", "", errors.New("user already exists")
 	}
 
-	token, encryptionKey := common.RandStringRunes(64), common.RandStringRunes(64)
+	token, encryptionKey := common.RandStringRunes(32), common.RandStringRunes(32)
 	user := common.User{
 		Wallet:        wallet,
 		ActionToken:   token,
 		EncryptionKey: encryptionKey,
+		Repos:         map[string][]cid.Cid{},
 	}
 	r.users[wallet] = user
 

@@ -2,9 +2,8 @@ package logic
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
+	"git-test/siwe"
 	"github.com/gin-gonic/gin"
-	"github.com/spruceid/siwe-go"
 	"net/http"
 )
 
@@ -15,7 +14,7 @@ type walletRequestBody struct {
 
 func (s *service) Login(c *gin.Context) {
 	var req walletRequestBody
-	if err := c.BindJSON(req); err != nil {
+	if err := c.BindJSON(&req); err != nil {
 		c.String(http.StatusBadRequest, fmt.Sprintf("can't parse request:%s", err.Error()))
 		return
 	}
@@ -23,6 +22,11 @@ func (s *service) Login(c *gin.Context) {
 	address, err := s.getMessageAddress(req)
 	if err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("can't get message address: %s", err.Error()))
+		return
+	}
+
+	if _, err := s.repo.GetUser(address); err != nil {
+		c.String(http.StatusBadRequest, fmt.Sprintf("user does not exist"))
 		return
 	}
 
@@ -39,7 +43,7 @@ func (s *service) Login(c *gin.Context) {
 
 func (s *service) Register(c *gin.Context) {
 	var req walletRequestBody
-	if err := c.BindJSON(req); err != nil {
+	if err := c.BindJSON(&req); err != nil {
 		c.String(http.StatusBadRequest, fmt.Sprintf("can't parse request:%s", err.Error()))
 		return
 	}
@@ -65,14 +69,8 @@ func (s *service) Register(c *gin.Context) {
 func (s *service) getMessageAddress(req walletRequestBody) (string, error) {
 	message, err := siwe.ParseMessage(req.Message)
 	if err != nil {
-
 		return "", fmt.Errorf("can't parse messageStr: %s", err.Error())
 	}
 
-	publicKey, err := message.VerifyEIP191(req.Signature)
-	if err != nil {
-		return "", fmt.Errorf("can't verify signature: %s", err.Error())
-	}
-
-	return crypto.PubkeyToAddress(*publicKey).Hex(), nil
+	return message.GetAddress().String(), nil
 }

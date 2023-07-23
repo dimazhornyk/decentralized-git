@@ -23,6 +23,7 @@ export const InitialView = () => {
         })) as string[]
 
         if (accounts.length > 0) {
+            console.log("ACCOUNTS", accounts[0])
             const balance = (await window.ethereum!.request({
                 method: 'eth_getBalance',
                 params: [accounts[0], 'latest'],

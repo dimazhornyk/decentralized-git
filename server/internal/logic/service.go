@@ -12,11 +12,13 @@ import (
 	"git-test/internal/connectors"
 	"github.com/gin-gonic/gin"
 	"github.com/ipfs/go-cid"
+	w3fs "github.com/web3-storage/go-w3s-client/fs"
 	"io"
 	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -232,19 +234,41 @@ func (s *service) uploadNewDiffs(wallet, repoName string, files map[string][]byt
 		}
 	}()
 
+	var openFiles []fs.File
 	for name, f := range files {
+		if strings.HasSuffix(name, "/") || strings.Contains(name, ".git") || strings.Contains(name, ".idea") {
+			continue
+		}
+
 		filename := fmt.Sprintf("%s/%s/%s", wallet, repoName, name)
+		if err := os.MkdirAll(filepath.Dir(filename), 0777); err != nil {
+			return cid.Cid{}, err
+		}
 		if err := os.WriteFile(filename, f, 0644); err != nil {
 			return cid.Cid{}, err
 		}
+
+		open, err := os.Open(filename)
+		if err != nil {
+			return cid.Cid{}, err
+		}
+		openFiles = append(openFiles, open)
 	}
 
-	f, err := os.Open(fmt.Sprintf("%s/%s", wallet, repoName))
-	if err != nil {
-		return cid.Cid{}, err
-	}
+	defer func() {
+		for _, f := range openFiles {
+			f.Close()
+		}
+	}()
 
-	id, err := s.storage.Upload(f)
+	newDir := w3fs.NewDir(wallet, openFiles)
+
+	//f, err := os.Open(fmt.Sprintf("%s/%s/", wallet, repoName))
+	//if err != nil {
+	//	return cid.Cid{}, err
+	//}
+
+	id, err := s.storage.Upload(newDir)
 	if err != nil {
 		return cid.Cid{}, err
 	}

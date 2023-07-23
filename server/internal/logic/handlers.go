@@ -3,6 +3,7 @@ package logic
 import (
 	"archive/zip"
 	"fmt"
+	"git-test/siwe"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
@@ -77,7 +78,13 @@ func (s *service) DownloadRepo(c *gin.Context) {
 
 	c.Header("Content-Description", "File Transfer")
 	c.Header("Content-Transfer-Encoding", "binary")
-	c.Header("Content-Disposition", "attachment; filename="+repoName+".zip")
+	c.Header("Content-Disposition", "attachment; filename=out.zip")
 	c.Header("Content-Type", "application/octet-stream")
 	c.File(path)
+}
+
+func (s *service) GetNonce(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"nonce": siwe.GenerateNonce(),
+	})
 }
